@@ -133,3 +133,38 @@ def reviewer_node(state:State) -> dict:
     response = reviewer_llm.invoke(
         [("system", REVIEWER_SYSTEM_PROMPT), ("human", prompt)]
     )
+
+
+# creation of the reviewer node
+def reviewer_node(state:State) -> dict:
+    """Reviews the draft and decides: approve or reject with feedback."""
+    draft = state['draft']
+
+    prompt = (
+        f"review this LinkedIn post draft : \n"
+        f"{draft}\n"
+        f"give your reviews"
+    )
+    response = reviewer_llm.invoke(
+        [("system", REVIEWER_SYSTEM_PROMPT), ("human", prompt)]
+    )
+    review_text = response.content.strip()
+     # finding the approved word
+
+     review_text = response.content.strip()
+
+is_approved = "APPROVED" in review_text.upper().split("FEEDBACK")[0]
+
+if "FEEDBACK:" in review_text:
+    feedback = review_text.split("FEEDBACK:", 1)[1].strip()
+else:
+    feedback = review_text
+
+verdict = "APPROVED" if is_approved else "REJECTED"
+print(f"[Verdict: {verdict}]")
+print(f"[Feedback: {feedback}]")
+
+return {
+    "review_feedback": feedback,
+    "is_approved": is_approved,
+}
