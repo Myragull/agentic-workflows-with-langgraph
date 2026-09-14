@@ -1,7 +1,7 @@
 import os
-from typing import TypedDict,Annotated, Literal
+from typing import TypedDict, Annotated, Literal
 from langgraph.graph.message import add_messages
-from langgraph.graph import StateGraph,START,END
+from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 from langchain_groq import ChatGroq
 from langchain_tavily import TavilySearch
@@ -9,39 +9,40 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-#tools
+# tools
 # Firstly creates tools for the agent to use them
 
-search_tools = TavilySearch(max_results = 3)
+search_tools = TavilySearch(max_results=3)
 
 tools = [search_tools]
 
-#llms
- 
-writer_llm = ChatGroq(model="openai/gpt-oss-120b",temperature=0.4) 
-# bcoz this llm will also in needs of the tools for web search for that we can 
+# llms
+
+writer_llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.4)
+
+# bcoz this llm will also in needs of the tools for web search for that we can
 # also bind th tools with it
 writer_llm_with_tools = writer_llm.bind_tools(tools)
 
 # reviewer
 
-reviewer_llm = ChatGroq(model="openai/gpt-oss-120b",temperature=0.1)
+reviewer_llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.1)
 
 
-#state building
+# state building
 
 class State(TypedDict):
-    topic : str
+    topic: str
     # the single topic received by the writer llm
-    messages : Annotated[list,add_messages]
+    messages: Annotated[list, add_messages]
     # for maintianing the conversation history acorss llms with api keys
-    draft : str
+    draft: str
     # not an original post a draft to be revied again and again
-    review_feedback : str
+    review_feedback: str
     # the feedback received by the witer llm again and again
-    is_approved :bool
+    is_approved: bool
     # whether the draft is approved or not by the reviewer llm
-    attempts : int
+    attempt: int
     # how many attempts
 
 
@@ -58,48 +59,54 @@ WRITER_SYSTEM_PROMPT = (
     "engagement. Do not use hashtags."
 )
 
+
 # Writer Node
-def writer_node(state : State) -> dict:
+def writer_node(state: State) -> dict:
     """Writes (or rewrites) the LinkedIn post. Can call Tavily to search first."""
     attempt = state.get("attempt", 0) + 1
     topic = state["topic"]
-    previous_feedback = state['review_feedback']
-if attempt == 1:
-    user_message = (
-        f"Write a LinkedIn post on this topic {topic}"
-        f"if you need current info search the web first"
-    )
-else:
-    user_message = (
-        f"your previous draft on '{topic}' was rejected"
-        f"Here is the reviewer's feedback \n\n {previous_feedback}\n\n"
-        f"Write a new, improved draft that fixes every issue mentiond"
-        f"do not repeat the same mistake"
-    )
-# conversation going to the llm with the previous feedback and the new topic to write a new draft
-messages = [("system", WRITER_SYSTEM_PROMPT),("human", user_message)]
-# calls the llm
-response = writer_llm_with_tools.invoke(messages)
+    previous_feedback = state["review_feedback"]
 
-return {
-    "messages" : [("human",user_message),response],
-    "attempt": attempt,
-}
+    if attempt == 1:
+        user_message = (
+            f"Write a LinkedIn post on this topic {topic}"
+            f"if you need current info search the web first"
+        )
+    else:
+        user_message = (
+            f"your previous draft on '{topic}' was rejected"
+            f"Here is the reviewer's feedback \n\n {previous_feedback}\n\n"
+            f"Write a new, improved draft that fixes every issue mentiond"
+            f"do not repeat the same mistake"
+        )
+
+    # conversation going to the llm with the previous feedback and the new topic to write a new draft
+    messages = [("system", WRITER_SYSTEM_PROMPT), ("human", user_message)]
+
+    # calls the llm
+    response = writer_llm_with_tools.invoke(messages)
+
+    return {
+        "messages": [("human", user_message), response],
+        "attempt": attempt,
+    }
 
 
 # making the tool node to be used for calling all the other tools
 tool_node = ToolNode(tools)
 
-# extraction node 
+# extraction node
 # to extract the conten or the draft or the mesage from the writer node
 
-def extract_draft_node(state:State) -> dict:
+def extract_draft_node(state: State) -> dict:
     """After the writer finishes tool calls, pulls the final text out as the draft."""
-    last_message = state['messages'][-1]
-# making a drat of the message or the AI response here
+    last_message = state["messages"][-1]
+
+    # making a drat of the message or the AI response here
     draft = last_message.content
-    print(f"\n\n Generated post \n{draft}|n")
-    return {"draft":draft}
+    print(f"\n\nGenerated post\n{draft}\n")
+    return {"draft": draft}
+
 
 # system prompt for the review node
 REVIEWER_SYSTEM_PROMPT = (
@@ -121,78 +128,117 @@ REVIEWER_SYSTEM_PROMPT = (
 
 
 # creation of draft node
-def reviewer_node(state:State) -> dict:
+def reviewer_node(state: State) -> dict:
     """Reviews the draft and decides: approve or reject with feedback."""
-    draft = state['draft']
+    draft = state["draft"]
 
     prompt = (
         f"review this LinkedIn post draft : \n"
         f"{draft}\n"
         f"give your reviews"
     )
+
     response = reviewer_llm.invoke(
         [("system", REVIEWER_SYSTEM_PROMPT), ("human", prompt)]
     )
 
-
-# creation of the reviewer node
-def reviewer_node(state:State) -> dict:
-    """Reviews the draft and decides: approve or reject with feedback."""
-    draft = state['draft']
-
-    prompt = (
-        f"review this LinkedIn post draft : \n"
-        f"{draft}\n"
-        f"give your reviews"
-    )
-    response = reviewer_llm.invoke(
-        [("system", REVIEWER_SYSTEM_PROMPT), ("human", prompt)]
-    )
+    # finding the approved word
     review_text = response.content.strip()
 
+    is_approved = "APPROVED" in review_text.upper().split("FEEDBACK")[0]
 
-     # finding the approved word
-review_text = response.content.strip()
+    if "FEEDBACK:" in review_text:
+        feedback = review_text.split("FEEDBACK:", 1)[1].strip()
+    else:
+        feedback = review_text
 
-is_approved = "APPROVED" in review_text.upper().split("FEEDBACK")[0]
+    verdict = "APPROVED" if is_approved else "REJECTED"
+    print(f"[Verdict: {verdict}]")
+    print(f"[Feedback: {feedback}]")
 
-if "FEEDBACK:" in review_text:
-    feedback = review_text.split("FEEDBACK:", 1)[1].strip()
-else:
-    feedback = review_text
-
-verdict = "APPROVED" if is_approved else "REJECTED"
-print(f"[Verdict: {verdict}]")
-print(f"[Feedback: {feedback}]")
-
-return {
-    "review_feedback": feedback,
-    "is_approved": is_approved,
-}
+    return {
+        "review_feedback": feedback,
+        "is_approved": is_approved,
+    }
 
 
 # Done with building major tools and all the stuff for changing the state
-# Router function  (For creating the logics around nodes )
+# Router function (For creating the logics around nodes)
 
-#router function
+# router function
 
-def should_use_tool(state:State):
-    last_message = state['messages'][-1]
+def should_use_tool(state: State):
+    last_message = state["messages"][-1]
 
-    if getattr(last_message, 'tool_calls', None):
+    if getattr(last_message, "tool_calls", None):
         return "tools"
     return "extract_draft"
 
 
-
-def should_stop_looping(state:State):
-    if state['is_approved']:
-        print("post haas been approved \n")
+def should_stop_looping(state: State):
+    if state["is_approved"]:
+        print("post has been approved \n")
         return END
-    if state['attempt'] >= 3:
+    if state["attempt"] >= 3:
         print("reached max attempts")
         return END
     return "writer"
 
 
+# build the graph
+graph = StateGraph(State)
 
+graph.add_node("writer", writer_node)
+graph.add_node("tools", tool_node)
+graph.add_node("extract_draft", extract_draft_node)
+graph.add_node("reviewer", reviewer_node)
+
+graph.add_edge(START, "writer")
+
+graph.add_conditional_edges(
+    "writer", should_use_tool
+)
+
+graph.add_edge("tools", "reviewer")
+graph.add_edge("extract_draft", "reviewer")
+
+graph.add_conditional_edges(
+    "reviewer", should_stop_looping
+)
+
+app = graph.compile()
+
+
+print("=" * 55)
+print("Welcome to the LinkedIn Post Generator")
+print("=" * 55)
+print("\nThis tool will draft a LinkedIn post for you, review it")
+print("itself, and iterate until it's publish-ready.")
+
+print("=" * 55)
+
+topic = input("\nWhat topic do you want a LinkedIn post about?\n> ").strip()
+
+if not topic:
+    print("\nNo topic given. Exiting.")
+else:
+    print("\nStarting generation...\n")
+
+    initial_state = {
+        "topic": topic,
+        "messages": [],
+        "draft": "",
+        "review_feedback": "",
+        "is_approved": False,
+        "attempt": 0,
+    }
+
+    final_state = app.invoke(initial_state)
+
+    print("\n" + "=" * 55)
+    print("FINAL LINKEDIN POST")
+    print("=" * 55)
+    print(final_state["draft"])
+    print("=" * 55)
+    print(f"Total attempts: {final_state['attempt']}")
+    print(f"Approved: {final_state['is_approved']}")
