@@ -101,4 +101,35 @@ def extract_draft_node(state:State) -> dict:
     print(f"\n\n Generated post \n{draft}|n")
     return {"draft":draft}
 
+# system prompt for the review node
+REVIEWER_SYSTEM_PROMPT = (
+    "You are a strict LinkedIn content reviewer. You judge whether a "
+    "post is publish-ready. Evaluate against these criteria:\n"
+    "1. Strong hook in the first line\n"
+    "2. One clear, valuable takeaway\n"
+    "3. Easy to skim — uses short paragraphs\n"
+    "4. Roughly 150–200 words\n"
+    "5. Ends with an engaging question or CTA\n"
+    "6. Professional but human tone (not corporate-robotic)\n"
+    "7. No hashtags\n"
+    "Respond in exactly this format:\n"
+    "VERDICT: APPROVED or REJECTED\n"
+    "FEEDBACK: <one short paragraph explaining why>\n"
+    "Be strict but fair. Approve only if the post genuinely meets all "
+    "criteria. Reject if even one criterion is clearly missing."
+)
 
+
+# creation of draft node
+def reviewer_node(state:State) -> dict:
+    """Reviews the draft and decides: approve or reject with feedback."""
+    draft = state['draft']
+
+    prompt = (
+        f"review this LinkedIn post draft : \n"
+        f"{draft}\n"
+        f"give your reviews"
+    )
+    response = reviewer_llm.invoke(
+        [("system", REVIEWER_SYSTEM_PROMPT), ("human", prompt)]
+    )
