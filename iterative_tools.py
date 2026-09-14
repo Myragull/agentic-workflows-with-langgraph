@@ -149,9 +149,10 @@ def reviewer_node(state:State) -> dict:
         [("system", REVIEWER_SYSTEM_PROMPT), ("human", prompt)]
     )
     review_text = response.content.strip()
-     # finding the approved word
 
-     review_text = response.content.strip()
+
+     # finding the approved word
+review_text = response.content.strip()
 
 is_approved = "APPROVED" in review_text.upper().split("FEEDBACK")[0]
 
@@ -168,3 +169,30 @@ return {
     "review_feedback": feedback,
     "is_approved": is_approved,
 }
+
+
+# Done with building major tools and all the stuff for changing the state
+# Router function  (For creating the logics around nodes )
+
+#router function
+
+def should_use_tool(state:State):
+    last_message = state['messages'][-1]
+
+    if getattr(last_message, 'tool_calls', None):
+        return "tools"
+    return "extract_draft"
+
+
+
+def should_stop_looping(state:State):
+    if state['is_approved']:
+        print("post haas been approved \n")
+        return END
+    if state['attempt'] >= 3:
+        print("reached max attempts")
+        return END
+    return "writer"
+
+
+
